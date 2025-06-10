@@ -92,6 +92,7 @@ void Error_Handler(void);
 #define DETECT_1_EXTI_IRQn EXTI15_10_IRQn
 #define AUX_BUTTON_Pin GPIO_PIN_12
 #define AUX_BUTTON_GPIO_Port GPIOA
+#define AUX_BUTTON_EXTI_IRQn EXTI15_10_IRQn
 #define Light_Sense_I2C_SCL_Pin GPIO_PIN_6
 #define Light_Sense_I2C_SCL_GPIO_Port GPIOB
 #define Light_sense_I2C_SDA_Pin GPIO_PIN_7

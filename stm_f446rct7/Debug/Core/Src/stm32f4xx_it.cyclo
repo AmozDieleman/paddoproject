@@ -13,7 +13,7 @@
 ../Core/Src/stm32f4xx_it.c:247:6:CAN1_RX1_IRQHandler	1
 ../Core/Src/stm32f4xx_it.c:261:6:CAN1_SCE_IRQHandler	1
 ../Core/Src/stm32f4xx_it.c:275:6:EXTI15_10_IRQHandler	1
-../Core/Src/stm32f4xx_it.c:290:6:CAN2_TX_IRQHandler	1
-../Core/Src/stm32f4xx_it.c:304:6:CAN2_RX0_IRQHandler	1
-../Core/Src/stm32f4xx_it.c:318:6:CAN2_RX1_IRQHandler	1
-../Core/Src/stm32f4xx_it.c:332:6:CAN2_SCE_IRQHandler	1
+../Core/Src/stm32f4xx_it.c:291:6:CAN2_TX_IRQHandler	1
+../Core/Src/stm32f4xx_it.c:305:6:CAN2_RX0_IRQHandler	1
+../Core/Src/stm32f4xx_it.c:319:6:CAN2_RX1_IRQHandler	1
+../Core/Src/stm32f4xx_it.c:333:6:CAN2_SCE_IRQHandler	1
