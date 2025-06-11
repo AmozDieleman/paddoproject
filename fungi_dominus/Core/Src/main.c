@@ -58,8 +58,7 @@ CAN_RxHeaderTypeDef RxHeader;
 uint8_t TxData;
 uint8_t RxData[1];
 
-uint8_t address;
-uint16_t global_address;
+uint16_t address;
 
 uint8_t dark_out_msg = 0x01;
 uint8_t light_out_msg = 0x03;
@@ -103,7 +102,7 @@ void leds_on(void);
 void leds_off(void);
 void OPT3002_set_conf(void);
 uint16_t OPT3002_result(void);
-uint8_t read_dip_address(void);
+uint16_t read_address(void);
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin);
 void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan);
 void HAL_CAN_RxFifo1MsgPendingCallback(CAN_HandleTypeDef *hcan);
@@ -155,8 +154,7 @@ int main(void) {
 	/*End of PWM channels initialization----------------------------------------*/
 
 	/*CAN Filter Configuration--------------------------------------------------*/
-	address = read_dip_address();
-	global_address = 0x0700 | address;
+	address = read_address();
 
 	CAN_FilterTypeDef canfilterconfig;
 
@@ -177,11 +175,11 @@ int main(void) {
 
 	canfilterconfig.FilterBank = 1;
 	canfilterconfig.FilterMode = CAN_FILTERMODE_IDMASK;
-	canfilterconfig.FilterScale = CAN_FILTERSCALE_32BIT;
+	canfilterconfig.FilterScale = CAN_FILTERSCALE_16BIT;
 
-	canfilterconfig.FilterIdHigh = 0xE000;
+	canfilterconfig.FilterIdHigh = (0x700 << 5);
 	canfilterconfig.FilterIdLow = 0x0000;
-	canfilterconfig.FilterMaskIdHigh = 0xE000;
+	canfilterconfig.FilterMaskIdHigh = (0x700 << 5);
 	canfilterconfig.FilterMaskIdLow = 0x0000;
 
 	canfilterconfig.FilterFIFOAssignment = CAN_RX_FIFO1;
@@ -226,7 +224,7 @@ int main(void) {
 			leds_on();
 			light_timer = uwTick;
 
-			TxHeader.StdId = address;
+			TxHeader.StdId = read_address();
 			if (HAL_CAN_AddTxMessage(&hcan1, &TxHeader, &detection_msg, &mb1) != HAL_OK) {
 				Error_Handler();
 			}
@@ -235,7 +233,7 @@ int main(void) {
 		if ((uwTick - light_timer) > 20000 && light_on == 1) {
 			light_on = 0;
 
-			TxHeader.StdId = global_address;
+			TxHeader.StdId = (0x700 | read_address());
 			if (HAL_CAN_AddTxMessage(&hcan1, &TxHeader, &light_off_msg, &mb1)
 					!= HAL_OK) {
 				Error_Handler();
@@ -578,8 +576,8 @@ int __io_putchar(int ch) {
 /*END Write printf to UART2---------------------------------------------------*/
 
 /*Read the mushrooms address from the DIP switches----------------------------*/
-uint8_t read_dip_address(void) {
-	uint8_t address = 0;
+uint16_t read_address(void) {
+	uint16_t address = 0x0000;
 
 	HAL_GPIO_WritePin(GPIOC, GPIO_PIN_0, GPIO_PIN_SET);
 	address |= !HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_5) << 7;
@@ -674,14 +672,16 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan) {
 	detection_flag = 1;
 
 //	printf("HAL_CAN_RxFifo0MsgPendingCallback\n\r");
-//	if (HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO0, &RxHeader, RxData) == HAL_OK) {
-//		printf("Message from: 0x%04lx: %02x\r\n", RxHeader.StdId, RxData[0]);
+	if (HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO0, &RxHeader, RxData) == HAL_OK) {
+		printf("Message on FIFO0 from: 0x%04lx: %02x\r\n", RxHeader.StdId, RxData[0]);
+		RxData[0] = 0;
+	}
 }
 
 void HAL_CAN_RxFifo1MsgPendingCallback(CAN_HandleTypeDef *hcan) {
 //	printf("HAL_CAN_RxFifo1MsgPendingCallback\n\r");
-	if (HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO0, &RxHeader, RxData) == HAL_OK) {
-//		printf("Message from: 0x%04lx: %02x\r\n", RxHeader.StdId, RxData[0]);
+	if (HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO1, &RxHeader, RxData) == HAL_OK) {
+		printf("Message on FIFO1 from: 0x%04lx: %02x\r\n", RxHeader.StdId, RxData[0]);
 
 		switch (RxData[0]) {
 		case 0x01:
