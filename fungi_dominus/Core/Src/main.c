@@ -50,6 +50,7 @@ TIM_HandleTypeDef htim8;
 
 /* USER CODE BEGIN PV */
 uint32_t light_timer;
+uint32_t opt3002_timer;
 
 /*CAN network variables-------------------------------------------------------*/
 CAN_TxHeaderTypeDef TxHeader;
@@ -72,15 +73,13 @@ uint8_t detection_msg = 0xFF;
 
 /*CAN message flags*/
 uint8_t dark_out_flag;
-uint8_t light_out_flag;
 uint8_t timer_rst_flag;
 uint8_t light_off_flag;
 
 /*Internal flags*/
 uint8_t light_on;
 uint8_t dark_outside;
-uint8_t ignore_det_msg;
-uint8_t ignore_tim_rst_msg;
+uint8_t dark_counter;
 uint8_t vandalised;
 
 /*Shared flags*/
@@ -100,8 +99,8 @@ static void MX_TIM8_Init(void);
 int __io_putchar(int ch);
 void leds_on(void);
 void leds_off(void);
-void OPT3002_set_conf(void);
-uint16_t OPT3002_result(void);
+void opt3002_set_conf(void);
+uint8_t opt3002_result(void);
 uint16_t read_address(void);
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin);
 void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan);
@@ -206,6 +205,7 @@ int main(void) {
 	uint32_t mb1;
 	/*END CAN transmission variables--------------------------------------------*/
 
+	opt3002_set_conf();
 	/* USER CODE END 2 */
 
 	/* Infinite loop */
@@ -214,9 +214,24 @@ int main(void) {
 		/* USER CODE END WHILE */
 
 		/* USER CODE BEGIN 3 */
-		if (detection_flag == 1 && light_on == 1) {
-			detection_flag = 0;
-		} else if (detection_flag == 1 && light_on == 0) {
+		if (dark_outside == 0 && (uwTick - opt3002_timer > 120000)) {
+			if (opt3002_result()) {
+				dark_counter++;
+
+				if (dark_counter >= 5) {
+					dark_counter = 0;
+					dark_outside = 1;
+
+					TxHeader.StdId = (0x700 | read_address());
+					if (HAL_CAN_AddTxMessage(&hcan1, &TxHeader, &dark_out_msg,
+							&mb1) != HAL_OK) {
+						Error_Handler();
+					}
+				}
+			}
+		}
+
+		if (detection_flag == 1 && light_on == 0) {
 
 			light_on = 1;
 			detection_flag = 0;
@@ -225,12 +240,31 @@ int main(void) {
 			light_timer = uwTick;
 
 			TxHeader.StdId = read_address();
-			if (HAL_CAN_AddTxMessage(&hcan1, &TxHeader, &detection_msg, &mb1) != HAL_OK) {
+			if (HAL_CAN_AddTxMessage(&hcan1, &TxHeader, &detection_msg, &mb1)
+					!= HAL_OK) {
+				Error_Handler();
+			}
+		} else if (detection_flag == 1 && light_on == 1) {
+			detection_flag = 0;
+
+			light_timer = uwTick;
+
+			TxHeader.StdId = (0x700 | read_address());
+			if (HAL_CAN_AddTxMessage(&hcan1, &TxHeader, &timer_rst_msg, &mb1)
+					!= HAL_OK) {
 				Error_Handler();
 			}
 		}
 
-		if ((uwTick - light_timer) > 20000 && light_on == 1) {
+		if (timer_rst_flag == 1 && light_on == 1) {
+			timer_rst_flag = 0;
+
+			light_timer = uwTick;
+		} else if (timer_rst_flag == 1 && light_on == 0) {
+			timer_rst_flag = 0;
+		}
+
+		if ((uwTick - light_timer) > 60000 && light_on == 1) {
 			light_on = 0;
 
 			TxHeader.StdId = (0x700 | read_address());
@@ -246,6 +280,7 @@ int main(void) {
 
 			leds_off();
 		}
+
 	}
 	/* USER CODE END 3 */
 }
@@ -595,43 +630,41 @@ uint16_t read_address(void) {
 /*Read the mushrooms address from the DIP switches----------------------------*/
 
 /*Set OPT3002 configuration register------------------------------------------*/
-void OPT3002_set_conf(void) {
+void opt3002_set_conf(void) {
 	uint8_t buf[3];
-	uint8_t OPT3002_ADDR = 0x44 << 1;
+	uint8_t opt3002_addr = 0x44 << 1;
 
+	// OPT3002 configuration register address
 	buf[0] = 0x01;
-	buf[1] = 0xCE;
-	buf[2] = 0x10;
 
-	if (HAL_I2C_Master_Transmit(&hi2c1, OPT3002_ADDR, buf, 3, HAL_MAX_DELAY)
-			!= HAL_OK) {
-		OPT3002_set_conf();
-	}
+	// Write 0xBA14 to configuration register, setting max. FSR, masking EXP and setting single-shot mode.
+	buf[1] = 0xBA;
+	buf[2] = 0x14;
+
+	HAL_I2C_Master_Transmit(&hi2c1, opt3002_addr, buf, 3, HAL_MAX_DELAY);
 }
 /*END Set OPT3002 configuration register--------------------------------------*/
 
 /*Read OPT3002 result register and process data-------------------------------*/
-uint16_t OPT3002_result(void) {
+uint8_t opt3002_result(void) {
 	uint8_t buf[2];
-	uint8_t OPT3002_ADDR = 0x44 << 1;
-	uint16_t licht = 0;
+	uint8_t opt3002_addr = 0x44 << 1;
 
+	// Set buffer to result register address and writing it to the OPT3002.
 	buf[0] = 0x00;
-	if (HAL_I2C_Master_Transmit(&hi2c1, OPT3002_ADDR, buf, 1, HAL_MAX_DELAY)
-			!= HAL_OK) {
-		printf("Error\r\n");
-	} else {
-		if (HAL_I2C_Master_Receive(&hi2c1, OPT3002_ADDR, buf, 2, HAL_MAX_DELAY)
-				!= HAL_OK) {
-			printf("Error\r\n");
-		} else {
-			licht = (2 ^ (buf[0] >> 4))
-					* (((uint16_t) buf[0] & 0x0F) << 8 | (uint16_t) buf[1]);
-			printf("Licht: %d\r\n", licht);
+	if (HAL_I2C_Master_Transmit(&hi2c1, opt3002_addr, buf, 1, HAL_MAX_DELAY)
+			== HAL_OK) {
+
+		// Request 2 bytes from result register.
+		if (HAL_I2C_Master_Receive(&hi2c1, opt3002_addr, buf, 2, HAL_MAX_DELAY)
+				== HAL_OK) {
+
+			// Compare result to darkness threshold, returns 1 when true.
+			return (buf[0] == 0 && buf[1] < 0xFF);
 		}
 	}
 
-	return licht;
+	return 0;
 }
 /*END Read OPT3002 result register and process data---------------------------*/
 
@@ -669,11 +702,10 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
 /* Configure CAN Callbacks----------------------------------------------------*/
 //DELETE UNNECESARY CALLBACKS FOR FINAL REVIEW
 void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan) {
-	detection_flag = 1;
-
-//	printf("HAL_CAN_RxFifo0MsgPendingCallback\n\r");
 	if (HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO0, &RxHeader, RxData) == HAL_OK) {
-		printf("Message on FIFO0 from: 0x%04lx: %02x\r\n", RxHeader.StdId, RxData[0]);
+		printf("Message on FIFO0 from: 0x%04lx: %02x\r\n", RxHeader.StdId,
+				RxData[0]);
+		detection_flag = 1;
 		RxData[0] = 0;
 	}
 }
@@ -681,7 +713,8 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan) {
 void HAL_CAN_RxFifo1MsgPendingCallback(CAN_HandleTypeDef *hcan) {
 //	printf("HAL_CAN_RxFifo1MsgPendingCallback\n\r");
 	if (HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO1, &RxHeader, RxData) == HAL_OK) {
-		printf("Message on FIFO1 from: 0x%04lx: %02x\r\n", RxHeader.StdId, RxData[0]);
+		printf("Message on FIFO1 from: 0x%04lx: %02x\r\n", RxHeader.StdId,
+				RxData[0]);
 
 		switch (RxData[0]) {
 		case 0x01:
@@ -689,7 +722,7 @@ void HAL_CAN_RxFifo1MsgPendingCallback(CAN_HandleTypeDef *hcan) {
 			break;
 
 		case 0x03:
-			light_out_flag = 1;
+			dark_out_flag = 3;
 			break;
 
 		case 0x07:
