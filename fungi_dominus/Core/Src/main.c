@@ -59,7 +59,7 @@ uint8_t TxData;
 uint8_t RxData[1];
 
 uint8_t address;
-uint16_t global_address = 0b11111111111;
+uint16_t global_address;
 
 uint8_t dark_out_msg = 0x01;
 uint8_t light_out_msg = 0x03;
@@ -106,12 +106,12 @@ uint16_t OPT3002_result(void);
 uint8_t read_dip_address(void);
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin);
 void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan);
-
+void HAL_CAN_RxFifo1MsgPendingCallback(CAN_HandleTypeDef *hcan);
+void HAL_CAN_ErrorCallback(CAN_HandleTypeDef *hcan);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-
 
 /* USER CODE END 0 */
 
@@ -156,6 +156,7 @@ int main(void) {
 
 	/*CAN Filter Configuration--------------------------------------------------*/
 	address = read_dip_address();
+	global_address = 0x0700 | address;
 
 	CAN_FilterTypeDef canfilterconfig;
 
@@ -174,18 +175,25 @@ int main(void) {
 
 	HAL_CAN_ConfigFilter(&hcan1, &canfilterconfig);
 
+	canfilterconfig.FilterBank = 1;
+	canfilterconfig.FilterMode = CAN_FILTERMODE_IDMASK;
+	canfilterconfig.FilterScale = CAN_FILTERSCALE_32BIT;
+
+	canfilterconfig.FilterIdHigh = 0xE000;
+	canfilterconfig.FilterIdLow = 0x0000;
+	canfilterconfig.FilterMaskIdHigh = 0xE000;
+	canfilterconfig.FilterMaskIdLow = 0x0000;
+
+	canfilterconfig.FilterFIFOAssignment = CAN_RX_FIFO1;
+	canfilterconfig.FilterActivation = ENABLE;
+
+	HAL_CAN_ConfigFilter(&hcan1, &canfilterconfig);
+
 	HAL_CAN_Start(&hcan1);
 
 	HAL_CAN_ActivateNotification(&hcan1,
-	CAN_IT_TX_MAILBOX_EMPTY |
 	CAN_IT_RX_FIFO0_MSG_PENDING |
-	CAN_IT_RX_FIFO0_FULL |
-	CAN_IT_RX_FIFO0_OVERRUN |
 	CAN_IT_RX_FIFO1_MSG_PENDING |
-	CAN_IT_RX_FIFO1_FULL |
-	CAN_IT_RX_FIFO1_OVERRUN |
-	CAN_IT_WAKEUP |
-	CAN_IT_SLEEP_ACK |
 	CAN_IT_ERROR_WARNING |
 	CAN_IT_ERROR_PASSIVE |
 	CAN_IT_BUSOFF |
@@ -196,7 +204,6 @@ int main(void) {
 	TxHeader.DLC = 1;
 	TxHeader.IDE = CAN_ID_STD;
 	TxHeader.RTR = CAN_RTR_DATA;
-	TxHeader.StdId = address;
 
 	uint32_t mb1;
 	/*END CAN transmission variables--------------------------------------------*/
@@ -209,9 +216,9 @@ int main(void) {
 		/* USER CODE END WHILE */
 
 		/* USER CODE BEGIN 3 */
-		if(detection_flag == 1 && light_on == 1) {
+		if (detection_flag == 1 && light_on == 1) {
 			detection_flag = 0;
-		}else if (detection_flag == 1 && light_on == 0) {
+		} else if (detection_flag == 1 && light_on == 0) {
 
 			light_on = 1;
 			detection_flag = 0;
@@ -219,19 +226,25 @@ int main(void) {
 			leds_on();
 			light_timer = uwTick;
 
-			HAL_CAN_AddTxMessage(&hcan1, &TxHeader, &detection_msg, &mb1);
-
+			TxHeader.StdId = address;
+			if (HAL_CAN_AddTxMessage(&hcan1, &TxHeader, &detection_msg, &mb1) != HAL_OK) {
+				Error_Handler();
+			}
 		}
 
-		if ((uwTick - light_timer > 10000 || light_off_flag == 1)
-				&& light_on == 1) {
-			light_off_flag = 0;
+		if ((uwTick - light_timer) > 20000 && light_on == 1) {
 			light_on = 0;
 
+			TxHeader.StdId = global_address;
 			if (HAL_CAN_AddTxMessage(&hcan1, &TxHeader, &light_off_msg, &mb1)
 					!= HAL_OK) {
 				Error_Handler();
 			}
+
+			leds_off();
+		} else if (light_off_flag == 1 && light_on == 1) {
+			light_off_flag = 0;
+			light_on = 0;
 
 			leds_off();
 		}
@@ -649,6 +662,8 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
 	if (GPIO_Pin == GPIO_PIN_12 || GPIO_Pin == GPIO_PIN_11
 			|| GPIO_Pin == GPIO_PIN_15) {
 		detection_flag = 1;
+	} else if (GPIO_Pin == GPIO_PIN_4) {
+		vandalised = 1;
 	}
 }
 /*GPIO Interrupt Callbacks----------------------------------------------------*/
@@ -656,19 +671,19 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
 /* Configure CAN Callbacks----------------------------------------------------*/
 //DELETE UNNECESARY CALLBACKS FOR FINAL REVIEW
 void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan) {
+	detection_flag = 1;
+
 //	printf("HAL_CAN_RxFifo0MsgPendingCallback\n\r");
+//	if (HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO0, &RxHeader, RxData) == HAL_OK) {
+//		printf("Message from: 0x%04lx: %02x\r\n", RxHeader.StdId, RxData[0]);
+}
+
+void HAL_CAN_RxFifo1MsgPendingCallback(CAN_HandleTypeDef *hcan) {
+//	printf("HAL_CAN_RxFifo1MsgPendingCallback\n\r");
 	if (HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO0, &RxHeader, RxData) == HAL_OK) {
 //		printf("Message from: 0x%04lx: %02x\r\n", RxHeader.StdId, RxData[0]);
 
-//		if (light_on == 0 && RxData[0] == 0xFF) {
-//			printf("%d\r\n", (light_on == 0 && RxData[0] == 0xFF));
-//			detection_flag = 1;
-//		}
 		switch (RxData[0]) {
-		case 0xFF:
-			detection_flag = 1;
-			break;
-
 		case 0x01:
 			dark_out_flag = 1;
 			break;
@@ -706,9 +721,7 @@ void HAL_CAN_ErrorCallback(CAN_HandleTypeDef *hcan) {
 void Error_Handler(void) {
 	/* USER CODE BEGIN Error_Handler_Debug */
 	/* User can add his own implementation to report the HAL error return state */
-	__disable_irq();
-	while (1) {
-	}
+	main();
 	/* USER CODE END Error_Handler_Debug */
 }
 
