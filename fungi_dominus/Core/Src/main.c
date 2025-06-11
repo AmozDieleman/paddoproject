@@ -59,6 +59,7 @@ uint8_t TxData;
 uint8_t RxData[1];
 
 uint8_t address;
+uint16_t global_address = 0b11111111111;
 
 uint8_t dark_out_msg = 0x01;
 uint8_t light_out_msg = 0x03;
@@ -104,76 +105,13 @@ void OPT3002_set_conf(void);
 uint16_t OPT3002_result(void);
 uint8_t read_dip_address(void);
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin);
+void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan);
+
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-/* Configure CAN Callbacks----------------------------------------------------*/
-//DELETE UNNECESARY CALLBACKS FOR FINAL REVIEW
-void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan) {
-	printf("HAL_CAN_RxFifo0MsgPendingCallback\n\r");
-	if (HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO0, &RxHeader, RxData) == HAL_OK) {
-		printf("Message from: 0x%04lx: %02x\r\n", RxHeader.StdId, RxData[0]);
 
-		if (light_on == 0 && RxData[0] == 0xFF && light_on == 0) {
-			detection_flag = 1;
-		}
-//		switch (RxData[0]) {
-//		case 0xFF:
-//			detection_flag = 1;
-//			printf("%d\r\n", detection_flag);
-////			if (light_on == 0) {
-////				detection_flag = 1;
-////			}
-////			if (ignore_det_msg == 0) {
-////				detection_flag = 1;
-////				ignore_det_msg = 1;
-////			}
-////			if (ignore_det_msg == 1) {
-////				ignore_det_msg = 0;
-////			}
-//			break;
-//
-//		case 0x01:
-//			dark_out_flag = 1;
-////			if (dark_outside == 0) {
-////				dark_outside = 1;
-////			}
-//			break;
-//
-//		case 0x03:
-//			light_out_flag = 1;
-////			if (dark_outside == 1) {
-////				dark_outside = 0;
-////			}
-//			break;
-//
-//		case 0x07:
-//			timer_rst_flag = 1;
-////			if (ignore_tim_rst_msg == 0) {
-////				timer_rst_flag = 1;
-////			}
-////			if (ignore_tim_rst_msg == 1) {
-////				ignore_tim_rst_msg = 0;
-////			}
-//			break;
-//
-//		case 0x0F:
-//			light_off_flag = 1;
-////			if (light_on) {
-////				light_off_flag = 1;
-////			}
-//			break;
-//
-//		default:
-//		}
-	}
-}
-
-void HAL_CAN_ErrorCallback(CAN_HandleTypeDef *hcan) {
-	printf("HAL_CAN_ErrorCallback\n\r");
-}
-/* End of CAN Callbacks-------------------------------------------------------*/
 
 /* USER CODE END 0 */
 
@@ -259,6 +197,8 @@ int main(void) {
 	TxHeader.IDE = CAN_ID_STD;
 	TxHeader.RTR = CAN_RTR_DATA;
 	TxHeader.StdId = address;
+
+	uint32_t mb1;
 	/*END CAN transmission variables--------------------------------------------*/
 
 	/* USER CODE END 2 */
@@ -267,9 +207,11 @@ int main(void) {
 	/* USER CODE BEGIN WHILE */
 	while (1) {
 		/* USER CODE END WHILE */
-		/* USER CODE BEGIN 3 */
 
-		if (detection_flag == 1) {
+		/* USER CODE BEGIN 3 */
+		if(detection_flag == 1 && light_on == 1) {
+			detection_flag = 0;
+		}else if (detection_flag == 1 && light_on == 0) {
 
 			light_on = 1;
 			detection_flag = 0;
@@ -277,11 +219,8 @@ int main(void) {
 			leds_on();
 			light_timer = uwTick;
 
-			uint32_t mb1;
-			if (HAL_CAN_AddTxMessage(&hcan1, &TxHeader, &detection_msg, &mb1)
-					!= HAL_OK) {
-				Error_Handler();
-			}
+			HAL_CAN_AddTxMessage(&hcan1, &TxHeader, &detection_msg, &mb1);
+
 		}
 
 		if ((uwTick - light_timer > 10000 || light_off_flag == 1)
@@ -289,7 +228,6 @@ int main(void) {
 			light_off_flag = 0;
 			light_on = 0;
 
-			uint32_t mb1;
 			if (HAL_CAN_AddTxMessage(&hcan1, &TxHeader, &light_off_msg, &mb1)
 					!= HAL_OK) {
 				Error_Handler();
@@ -568,10 +506,10 @@ static void MX_GPIO_Init(void) {
 	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
 	HAL_GPIO_Init(PWR_DIPS_GPIO_Port, &GPIO_InitStruct);
 
-	/*Configure GPIO pins : KICK_Pin DETECT_1_Pin AUX_BUTTON_Pin */
-	GPIO_InitStruct.Pin = KICK_Pin | DETECT_1_Pin | AUX_BUTTON_Pin;
+	/*Configure GPIO pins : KICK_Pin DETECT_1_Pin */
+	GPIO_InitStruct.Pin = KICK_Pin | DETECT_1_Pin;
 	GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
-	GPIO_InitStruct.Pull = GPIO_NOPULL;
+	GPIO_InitStruct.Pull = GPIO_PULLDOWN;
 	HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
 	/*Configure GPIO pins : DIP_0_Pin DIP_1_Pin DIP_2_Pin */
@@ -595,8 +533,14 @@ static void MX_GPIO_Init(void) {
 	/*Configure GPIO pin : DETECT_0_Pin */
 	GPIO_InitStruct.Pin = DETECT_0_Pin;
 	GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
-	GPIO_InitStruct.Pull = GPIO_NOPULL;
+	GPIO_InitStruct.Pull = GPIO_PULLDOWN;
 	HAL_GPIO_Init(DETECT_0_GPIO_Port, &GPIO_InitStruct);
+
+	/*Configure GPIO pin : AUX_BUTTON_Pin */
+	GPIO_InitStruct.Pin = AUX_BUTTON_Pin;
+	GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
+	GPIO_InitStruct.Pull = GPIO_PULLUP;
+	HAL_GPIO_Init(AUX_BUTTON_GPIO_Port, &GPIO_InitStruct);
 
 	/* EXTI interrupt init*/
 	HAL_NVIC_SetPriority(EXTI4_IRQn, 0, 0);
@@ -625,14 +569,14 @@ uint8_t read_dip_address(void) {
 	uint8_t address = 0;
 
 	HAL_GPIO_WritePin(GPIOC, GPIO_PIN_0, GPIO_PIN_SET);
-	address |= HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_5) << 7;
-	address |= HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_6) << 6;
-	address |= HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_7) << 5;
-	address |= HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_4) << 4;
-	address |= HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_5) << 3;
-	address |= HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_0) << 2;
-	address |= HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_1) << 1;
-	address |= HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_2);
+	address |= !HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_5) << 7;
+	address |= !HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_6) << 6;
+	address |= !HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_7) << 5;
+	address |= !HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_4) << 4;
+	address |= !HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_5) << 3;
+	address |= !HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_0) << 2;
+	address |= !HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_1) << 1;
+	address |= !HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_2);
 	HAL_GPIO_WritePin(GPIOC, GPIO_PIN_0, GPIO_PIN_RESET);
 
 	return address;
@@ -702,12 +646,56 @@ void leds_off(void) {
 
 /*GPIO Interrupt Callbacks----------------------------------------------------*/
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
-	if ((GPIO_Pin == GPIO_PIN_12 || GPIO_Pin == GPIO_PIN_11
-			|| GPIO_Pin == GPIO_PIN_15) && light_on == 0) {
+	if (GPIO_Pin == GPIO_PIN_12 || GPIO_Pin == GPIO_PIN_11
+			|| GPIO_Pin == GPIO_PIN_15) {
 		detection_flag = 1;
 	}
 }
 /*GPIO Interrupt Callbacks----------------------------------------------------*/
+
+/* Configure CAN Callbacks----------------------------------------------------*/
+//DELETE UNNECESARY CALLBACKS FOR FINAL REVIEW
+void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan) {
+//	printf("HAL_CAN_RxFifo0MsgPendingCallback\n\r");
+	if (HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO0, &RxHeader, RxData) == HAL_OK) {
+//		printf("Message from: 0x%04lx: %02x\r\n", RxHeader.StdId, RxData[0]);
+
+//		if (light_on == 0 && RxData[0] == 0xFF) {
+//			printf("%d\r\n", (light_on == 0 && RxData[0] == 0xFF));
+//			detection_flag = 1;
+//		}
+		switch (RxData[0]) {
+		case 0xFF:
+			detection_flag = 1;
+			break;
+
+		case 0x01:
+			dark_out_flag = 1;
+			break;
+
+		case 0x03:
+			light_out_flag = 1;
+			break;
+
+		case 0x07:
+			timer_rst_flag = 1;
+			break;
+
+		case 0x0F:
+			light_off_flag = 1;
+			break;
+
+		default:
+		}
+
+		RxData[0] = 0;
+	}
+}
+
+void HAL_CAN_ErrorCallback(CAN_HandleTypeDef *hcan) {
+	printf("HAL_CAN_ErrorCallback\n\r");
+}
+/* End of CAN Callbacks-------------------------------------------------------*/
 
 /* USER CODE END 4 */
 
