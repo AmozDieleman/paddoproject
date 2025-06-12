@@ -15,30 +15,11 @@
  *
  ******************************************************************************
  */
-/* USER CODE END Header */
+
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
-
-/* Private includes ----------------------------------------------------------*/
-/* USER CODE BEGIN Includes */
 #include <stdlib.h>
 #include <stdio.h>
-/* USER CODE END Includes */
-
-/* Private typedef -----------------------------------------------------------*/
-/* USER CODE BEGIN PTD */
-
-/* USER CODE END PTD */
-
-/* Private define ------------------------------------------------------------*/
-/* USER CODE BEGIN PD */
-
-/* USER CODE END PD */
-
-/* Private macro -------------------------------------------------------------*/
-/* USER CODE BEGIN PM */
-
-/* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
 CAN_HandleTypeDef hcan1;
@@ -48,7 +29,6 @@ I2C_HandleTypeDef hi2c1;
 TIM_HandleTypeDef htim1;
 TIM_HandleTypeDef htim8;
 
-/* USER CODE BEGIN PV */
 uint32_t light_timer;
 uint32_t opt3002_timer;
 
@@ -68,7 +48,6 @@ uint8_t detection_msg = 0xFF;
 /*END CAN network variables---------------------------------------------------*/
 
 /*Callback Flags--------------------------------------------------------------*/
-
 /*CAN message flags*/
 uint8_t dark_out_flag;
 uint8_t timer_rst_flag;
@@ -84,7 +63,6 @@ uint8_t vandalised;
 uint8_t detection_flag;
 /*END Callback Flags----------------------------------------------------------*/
 
-/* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
@@ -93,7 +71,7 @@ static void MX_CAN1_Init(void);
 static void MX_I2C1_Init(void);
 static void MX_TIM1_Init(void);
 static void MX_TIM8_Init(void);
-/* USER CODE BEGIN PFP */
+
 /* Callback functions prototypes */
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin);
 void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan);
@@ -111,38 +89,19 @@ uint8_t opt3002_result(void);
 /* CAN address readout function prototype */
 uint16_t read_address(void);
 
-/* USER CODE END PFP */
-
 /* Private user code ---------------------------------------------------------*/
-/* USER CODE BEGIN 0 */
-
-/* USER CODE END 0 */
-
 /**
  * @brief  The application entry point.
  * @retval int
  */
 int main(void) {
-
-	/* USER CODE BEGIN 1 */
-
-	/* USER CODE END 1 */
-
 	/* MCU Configuration------------------------------------------------------*/
 
 	/* Reset of all peripherals, Initializes the Flash interface and the Systick. */
 	HAL_Init();
 
-	/* USER CODE BEGIN Init */
-
-	/* USER CODE END Init */
-
 	/* Configure the system clock */
 	SystemClock_Config();
-
-	/* USER CODE BEGIN SysInit */
-
-	/* USER CODE END SysInit */
 
 	/* Initialize all configured peripherals */
 	MX_GPIO_Init();
@@ -150,7 +109,7 @@ int main(void) {
 	MX_I2C1_Init();
 	MX_TIM1_Init();
 	MX_TIM8_Init();
-	/* USER CODE BEGIN 2 */
+
 	/*Turn on PWM channels for driving the LED's------------------------------*/
 	HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_2); //test leds
 	HAL_TIM_PWM_Start(&htim8, TIM_CHANNEL_1);
@@ -205,17 +164,10 @@ int main(void) {
 	uint32_t mb1;					// Use mailbox 1
 	/*END CAN transmission variables------------------------------------------*/
 
-	/*  */
 	opt3002_set_conf();
-	/* USER CODE END 2 */
 
 	/* Infinite loop */
-	/* USER CODE BEGIN WHILE */
 	while (1) {
-		/* USER CODE END WHILE */
-
-		/* USER CODE BEGIN 3 */
-
 		/*Only run when dark outside*/
 		if (dark_outside == 1) {
 
@@ -341,7 +293,6 @@ int main(void) {
 		}
 		/* END Handling of darkness flags */
 	}
-	/* USER CODE END 3 */
 }
 
 /**
@@ -389,18 +340,8 @@ void SystemClock_Config(void) {
 
 /**
  * @brief CAN1 Initialization Function
- * @param None
- * @retval None
  */
 static void MX_CAN1_Init(void) {
-
-	/* USER CODE BEGIN CAN1_Init 0 */
-
-	/* USER CODE END CAN1_Init 0 */
-
-	/* USER CODE BEGIN CAN1_Init 1 */
-
-	/* USER CODE END CAN1_Init 1 */
 	hcan1.Instance = CAN1;
 	hcan1.Init.Prescaler = 10;
 	hcan1.Init.Mode = CAN_MODE_NORMAL;
@@ -416,26 +357,12 @@ static void MX_CAN1_Init(void) {
 	if (HAL_CAN_Init(&hcan1) != HAL_OK) {
 		Error_Handler();
 	}
-	/* USER CODE BEGIN CAN1_Init 2 */
-
-	/* USER CODE END CAN1_Init 2 */
-
 }
 
 /**
  * @brief I2C1 Initialization Function
- * @param None
- * @retval None
  */
 static void MX_I2C1_Init(void) {
-
-	/* USER CODE BEGIN I2C1_Init 0 */
-
-	/* USER CODE END I2C1_Init 0 */
-
-	/* USER CODE BEGIN I2C1_Init 1 */
-
-	/* USER CODE END I2C1_Init 1 */
 	hi2c1.Instance = I2C1;
 	hi2c1.Init.ClockSpeed = 100000;
 	hi2c1.Init.DutyCycle = I2C_DUTYCYCLE_2;
@@ -448,30 +375,16 @@ static void MX_I2C1_Init(void) {
 	if (HAL_I2C_Init(&hi2c1) != HAL_OK) {
 		Error_Handler();
 	}
-	/* USER CODE BEGIN I2C1_Init 2 */
-
-	/* USER CODE END I2C1_Init 2 */
-
 }
 
 /**
  * @brief TIM1 Initialization Function
- * @param None
- * @retval None
  */
 static void MX_TIM1_Init(void) {
-
-	/* USER CODE BEGIN TIM1_Init 0 */
-
-	/* USER CODE END TIM1_Init 0 */
-
 	TIM_MasterConfigTypeDef sMasterConfig = { 0 };
 	TIM_OC_InitTypeDef sConfigOC = { 0 };
 	TIM_BreakDeadTimeConfigTypeDef sBreakDeadTimeConfig = { 0 };
 
-	/* USER CODE BEGIN TIM1_Init 1 */
-
-	/* USER CODE END TIM1_Init 1 */
 	htim1.Instance = TIM1;
 	htim1.Init.Prescaler = 4;
 	htim1.Init.CounterMode = TIM_COUNTERMODE_UP;
@@ -510,31 +423,18 @@ static void MX_TIM1_Init(void) {
 			!= HAL_OK) {
 		Error_Handler();
 	}
-	/* USER CODE BEGIN TIM1_Init 2 */
 
-	/* USER CODE END TIM1_Init 2 */
 	HAL_TIM_MspPostInit(&htim1);
-
 }
 
 /**
  * @brief TIM8 Initialization Function
- * @param None
- * @retval None
  */
 static void MX_TIM8_Init(void) {
-
-	/* USER CODE BEGIN TIM8_Init 0 */
-
-	/* USER CODE END TIM8_Init 0 */
-
 	TIM_MasterConfigTypeDef sMasterConfig = { 0 };
 	TIM_OC_InitTypeDef sConfigOC = { 0 };
 	TIM_BreakDeadTimeConfigTypeDef sBreakDeadTimeConfig = { 0 };
 
-	/* USER CODE BEGIN TIM8_Init 1 */
-
-	/* USER CODE END TIM8_Init 1 */
 	htim8.Instance = TIM8;
 	htim8.Init.Prescaler = 4;
 	htim8.Init.CounterMode = TIM_COUNTERMODE_UP;
@@ -577,23 +477,15 @@ static void MX_TIM8_Init(void) {
 			!= HAL_OK) {
 		Error_Handler();
 	}
-	/* USER CODE BEGIN TIM8_Init 2 */
 
-	/* USER CODE END TIM8_Init 2 */
 	HAL_TIM_MspPostInit(&htim8);
-
 }
 
 /**
  * @brief GPIO Initialization Function
- * @param None
- * @retval None
  */
 static void MX_GPIO_Init(void) {
 	GPIO_InitTypeDef GPIO_InitStruct = { 0 };
-	/* USER CODE BEGIN MX_GPIO_Init_1 */
-
-	/* USER CODE END MX_GPIO_Init_1 */
 
 	/* GPIO Ports Clock Enable */
 	__HAL_RCC_GPIOC_CLK_ENABLE();
@@ -653,13 +545,7 @@ static void MX_GPIO_Init(void) {
 
 	HAL_NVIC_SetPriority(EXTI15_10_IRQn, 0, 0);
 	HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
-
-	/* USER CODE BEGIN MX_GPIO_Init_2 */
-
-	/* USER CODE END MX_GPIO_Init_2 */
 }
-
-/* USER CODE BEGIN 4 */
 
 /** read_address()--------------------------------------------------------------
  * @brief Power the DIP switches and iterate through each to determine address
@@ -802,8 +688,6 @@ void HAL_CAN_RxFifo1MsgPendingCallback(CAN_HandleTypeDef *hcan) {
 }
 
 /* END CAN Callbacks----------------------------------------------------------*/
-
-/* USER CODE END 4 */
 
 /**
  * @brief  This function is executed in case of error occurrence, starts main().
