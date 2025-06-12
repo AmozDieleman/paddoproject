@@ -56,17 +56,15 @@ uint32_t opt3002_timer;
 CAN_TxHeaderTypeDef TxHeader;
 CAN_RxHeaderTypeDef RxHeader;
 
-uint8_t TxData;
+// Receiving data buffer
 uint8_t RxData[1];
 
-uint16_t address;
-
+// Different messages used on the bus
 uint8_t dark_out_msg = 0x01;
 uint8_t light_out_msg = 0x03;
 uint8_t timer_rst_msg = 0x07;
 uint8_t light_off_msg = 0x0F;
 uint8_t detection_msg = 0xFF;
-
 /*END CAN network variables---------------------------------------------------*/
 
 /*Callback Flags--------------------------------------------------------------*/
@@ -96,16 +94,23 @@ static void MX_I2C1_Init(void);
 static void MX_TIM1_Init(void);
 static void MX_TIM8_Init(void);
 /* USER CODE BEGIN PFP */
-int __io_putchar(int ch);
-void leds_on(void);
-void leds_off(void);
-void opt3002_set_conf(void);
-uint8_t opt3002_result(void);
-uint16_t read_address(void);
+/* Callback functions prototypes */
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin);
 void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan);
 void HAL_CAN_RxFifo1MsgPendingCallback(CAN_HandleTypeDef *hcan);
 void HAL_CAN_ErrorCallback(CAN_HandleTypeDef *hcan);
+
+/* LED module driving functions prototypes */
+void leds_on(void);
+void leds_off(void);
+
+/* OPT3002 light sensor driving functions prototypes */
+void opt3002_set_conf(void);
+uint8_t opt3002_result(void);
+
+/* CAN address readout function prototype */
+uint16_t read_address(void);
+
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -123,7 +128,7 @@ int main(void) {
 
 	/* USER CODE END 1 */
 
-	/* MCU Configuration--------------------------------------------------------*/
+	/* MCU Configuration------------------------------------------------------*/
 
 	/* Reset of all peripherals, Initializes the Flash interface and the Systick. */
 	HAL_Init();
@@ -146,26 +151,26 @@ int main(void) {
 	MX_TIM1_Init();
 	MX_TIM8_Init();
 	/* USER CODE BEGIN 2 */
-	/*Turn on PWM channels for driving the LED's--------------------------------*/
+	/*Turn on PWM channels for driving the LED's------------------------------*/
 	HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_2); //test leds
 	HAL_TIM_PWM_Start(&htim8, TIM_CHANNEL_1);
-	HAL_TIM_PWM_Start(&htim8, TIM_CHANNEL_4);
-	/*End of PWM channels initialization----------------------------------------*/
+	/*End of PWM channels initialization--------------------------------------*/
 
-	/*CAN Filter Configuration--------------------------------------------------*/
-	address = read_address();
-
+	/*CAN Filter Configuration--------------------------------------------------
+	 * @brief Filter configuration to make sure Fifo0 only receives messages from neighbouring addresses, Fifo1 receives all messages with global addresses
+	 */
 	CAN_FilterTypeDef canfilterconfig;
 
+	uint16_t address = read_address();
 	canfilterconfig.FilterBank = 0;
 	canfilterconfig.FilterMode = CAN_FILTERMODE_IDLIST;
 	canfilterconfig.FilterScale = CAN_FILTERSCALE_16BIT;
-
+	// Add directly neighbouring addresses to the filter
 	canfilterconfig.FilterIdLow = ((address - 1) << 5);
 	canfilterconfig.FilterIdHigh = ((address + 1) << 5);
 	canfilterconfig.FilterMaskIdLow = 0;
 	canfilterconfig.FilterMaskIdHigh = 0;
-
+	// Receive these messages on Fifo0 for use of separate interrupts
 	canfilterconfig.FilterFIFOAssignment = CAN_RX_FIFO0;
 	canfilterconfig.FilterActivation = ENABLE;
 	canfilterconfig.SlaveStartFilterBank = 14;
@@ -175,12 +180,12 @@ int main(void) {
 	canfilterconfig.FilterBank = 1;
 	canfilterconfig.FilterMode = CAN_FILTERMODE_IDMASK;
 	canfilterconfig.FilterScale = CAN_FILTERSCALE_16BIT;
-
+	// Add all globaal addresses to the filter, global 11-bit addresses are defined as 0b111 + address (8 bits from dips)
 	canfilterconfig.FilterIdHigh = (0x700 << 5);
 	canfilterconfig.FilterIdLow = 0x0000;
 	canfilterconfig.FilterMaskIdHigh = (0x700 << 5);
 	canfilterconfig.FilterMaskIdLow = 0x0000;
-
+	// Receive these global messages on Fifo1 for use of separate interrupts
 	canfilterconfig.FilterFIFOAssignment = CAN_RX_FIFO1;
 	canfilterconfig.FilterActivation = ENABLE;
 
@@ -190,21 +195,17 @@ int main(void) {
 
 	HAL_CAN_ActivateNotification(&hcan1,
 	CAN_IT_RX_FIFO0_MSG_PENDING |
-	CAN_IT_RX_FIFO1_MSG_PENDING |
-	CAN_IT_ERROR_WARNING |
-	CAN_IT_ERROR_PASSIVE |
-	CAN_IT_BUSOFF |
-	CAN_IT_LAST_ERROR_CODE |
-	CAN_IT_ERROR);
-	/*End CAN Filter Configuration----------------------------------------------*/
-	/*CAN transmission variables------------------------------------------------*/
-	TxHeader.DLC = 1;
-	TxHeader.IDE = CAN_ID_STD;
-	TxHeader.RTR = CAN_RTR_DATA;
+	CAN_IT_RX_FIFO1_MSG_PENDING);
+	/*End CAN Filter Configuration--------------------------------------------*/
+	/*CAN transmission variables----------------------------------------------*/
+	TxHeader.DLC = 1; 				// Send 1 byte of data
+	TxHeader.IDE = CAN_ID_STD;		// Standard 11-bit ID
+	TxHeader.RTR = CAN_RTR_DATA;	// Send data, none is requested
 
-	uint32_t mb1;
-	/*END CAN transmission variables--------------------------------------------*/
+	uint32_t mb1;					// Use mailbox 1
+	/*END CAN transmission variables------------------------------------------*/
 
+	/*  */
 	opt3002_set_conf();
 	/* USER CODE END 2 */
 
@@ -214,8 +215,109 @@ int main(void) {
 		/* USER CODE END WHILE */
 
 		/* USER CODE BEGIN 3 */
+
+		/*Only run when dark outside*/
+		if (dark_outside == 1) {
+
+			/** Detection handling
+			 * @brief When detection occurs, through PIR or CAN, turn light on when light is off and signal neighbouring shrooms to turn on, else reset timer and signal whole array to reset timer.
+			 * */
+			if (detection_flag == 1 && light_on == 0) {
+
+				light_on = 1;
+				detection_flag = 0;
+
+				leds_on();
+				light_timer = uwTick;
+
+				TxHeader.StdId = read_address();
+				if (HAL_CAN_AddTxMessage(&hcan1, &TxHeader, &detection_msg,
+						&mb1) != HAL_OK) {
+					Error_Handler();
+				}
+			} else if (detection_flag == 1 && light_on == 1) {
+				detection_flag = 0;
+
+				light_timer = uwTick;
+
+				// (0x700 | read_address()) gives this message the "global" ID of the shroom
+				TxHeader.StdId = (0x700 | read_address());
+				if (HAL_CAN_AddTxMessage(&hcan1, &TxHeader, &timer_rst_msg,
+						&mb1) != HAL_OK) {
+					Error_Handler();
+				}
+			}
+			/* END Detection handling */
+
+			/** timer_rst_flag handling
+			 * @brief Reset light timer when timer_rst_msg received, ignored if light is on.
+			 * */
+			if (timer_rst_flag == 1 && light_on == 1) {
+				timer_rst_flag = 0;
+
+				light_timer = uwTick;
+			} else if (timer_rst_flag == 1 && light_on == 0) {
+				timer_rst_flag = 0;
+			}
+			/* END timer_st_flag handling*/
+
+			/** leds_off handling
+			 * @brief Turns light off when timer exceeds 1 minute or when light_off_msg received.
+			 * */
+			if ((uwTick - light_timer) > 60000 && light_on == 1) {
+				light_on = 0;
+
+				// When mushroom is the first in it's array to turn off, message other shrooms to turn off for nice effect.
+				TxHeader.StdId = (0x700 | read_address());
+				if (HAL_CAN_AddTxMessage(&hcan1, &TxHeader, &light_off_msg,
+						&mb1) != HAL_OK) {
+					Error_Handler();
+				}
+
+				leds_off();
+			} else if (light_off_flag == 1 && light_on == 1) {
+				light_off_flag = 0;
+				light_on = 0;
+
+				leds_off();
+			}
+			/* END leds_off handling */
+
+			/** Handling of darkness flags when dark outside
+			 * @brief Read OPT3002 result register every 2 minutes, with five negatives switch dark_outside and send light_out_msg. Also switches when receiving light_out_msg.
+			 */
+			if (uwTick - opt3002_timer > 120000) {
+				if (opt3002_result() == 0) {
+					dark_counter++;
+
+					if (dark_counter >= 5) {
+						dark_counter = 0;
+						dark_outside = 0;
+
+						TxHeader.StdId = (0x700 | read_address());
+						if (HAL_CAN_AddTxMessage(&hcan1, &TxHeader,
+								&light_out_msg, &mb1) != HAL_OK) {
+							Error_Handler();
+						}
+					}
+
+					opt3002_set_conf();
+					opt3002_timer = uwTick;
+				}
+			} else if (dark_out_flag == 3) {
+				dark_out_flag = 0;
+				dark_outside = 0;
+			} else if (dark_out_flag == 1) {
+				dark_out_flag = 0;
+			}
+			/* END Handling of darkness flags */
+		}
+
+		/** Handling of darkness flags when light outside
+		 * @brief Read OPT3002 result register every 2 minutes, with five negatives switch dark_outside and send light_out_msg. Also switches when receiving light_out_msg.
+		 */
 		if (dark_outside == 0 && (uwTick - opt3002_timer > 120000)) {
-			if (opt3002_result()) {
+			if (opt3002_result() == 1) {
 				dark_counter++;
 
 				if (dark_counter >= 5) {
@@ -228,59 +330,16 @@ int main(void) {
 						Error_Handler();
 					}
 				}
+
+				opt3002_set_conf();
+				opt3002_timer = uwTick;
 			}
+		} else if (dark_outside == 0 && dark_out_flag == 1) {
+			dark_counter = 0;
+			dark_outside = 1;
+			dark_out_flag = 0;
 		}
-
-		if (detection_flag == 1 && light_on == 0) {
-
-			light_on = 1;
-			detection_flag = 0;
-
-			leds_on();
-			light_timer = uwTick;
-
-			TxHeader.StdId = read_address();
-			if (HAL_CAN_AddTxMessage(&hcan1, &TxHeader, &detection_msg, &mb1)
-					!= HAL_OK) {
-				Error_Handler();
-			}
-		} else if (detection_flag == 1 && light_on == 1) {
-			detection_flag = 0;
-
-			light_timer = uwTick;
-
-			TxHeader.StdId = (0x700 | read_address());
-			if (HAL_CAN_AddTxMessage(&hcan1, &TxHeader, &timer_rst_msg, &mb1)
-					!= HAL_OK) {
-				Error_Handler();
-			}
-		}
-
-		if (timer_rst_flag == 1 && light_on == 1) {
-			timer_rst_flag = 0;
-
-			light_timer = uwTick;
-		} else if (timer_rst_flag == 1 && light_on == 0) {
-			timer_rst_flag = 0;
-		}
-
-		if ((uwTick - light_timer) > 60000 && light_on == 1) {
-			light_on = 0;
-
-			TxHeader.StdId = (0x700 | read_address());
-			if (HAL_CAN_AddTxMessage(&hcan1, &TxHeader, &light_off_msg, &mb1)
-					!= HAL_OK) {
-				Error_Handler();
-			}
-
-			leds_off();
-		} else if (light_off_flag == 1 && light_on == 1) {
-			light_off_flag = 0;
-			light_on = 0;
-
-			leds_off();
-		}
-
+		/* END Handling of darkness flags */
 	}
 	/* USER CODE END 3 */
 }
@@ -602,15 +661,10 @@ static void MX_GPIO_Init(void) {
 
 /* USER CODE BEGIN 4 */
 
-/*Write printf to UART2-------------------------------------------------------*/
-// Useful for debugging, remove for final version.
-int __io_putchar(int ch) {
-	ITM_SendChar(ch);
-	return ch;
-}
-/*END Write printf to UART2---------------------------------------------------*/
-
-/*Read the mushrooms address from the DIP switches----------------------------*/
+/** read_address()--------------------------------------------------------------
+ * @brief Power the DIP switches and iterate through each to determine address
+ * @retval 16 bit integer containing the CAN address
+ */
 uint16_t read_address(void) {
 	uint16_t address = 0x0000;
 
@@ -627,9 +681,11 @@ uint16_t read_address(void) {
 
 	return address;
 }
-/*Read the mushrooms address from the DIP switches----------------------------*/
+/*END read_address()----------------------------------------------------------*/
 
-/*Set OPT3002 configuration register------------------------------------------*/
+/** opt3002_set_conf()----------------------------------------------------------
+ * @brief Writes configuration to OPT3002 configuration register
+ */
 void opt3002_set_conf(void) {
 	uint8_t buf[3];
 	uint8_t opt3002_addr = 0x44 << 1;
@@ -643,9 +699,12 @@ void opt3002_set_conf(void) {
 
 	HAL_I2C_Master_Transmit(&hi2c1, opt3002_addr, buf, 3, HAL_MAX_DELAY);
 }
-/*END Set OPT3002 configuration register--------------------------------------*/
+/*END opt3002_set_conf()------------------------------------------------------*/
 
-/*Read OPT3002 result register and process data-------------------------------*/
+/*opt3002_result()--------------------------------------------------------------
+ * @brief Read OPT3002 result register and process data
+ * @retval boolean: true when dark, false when light outside
+ */
 uint8_t opt3002_result(void) {
 	uint8_t buf[2];
 	uint8_t opt3002_addr = 0x44 << 1;
@@ -664,13 +723,13 @@ uint8_t opt3002_result(void) {
 		}
 	}
 
-	return 0;
+	return -1;
 }
-/*END Read OPT3002 result register and process data---------------------------*/
+/*END opt3002_result()--------------------------------------------------------*/
 
 /*LED control functions-------------------------------------------------------*/
-// Change to &htim8, TIM_CHANNEL_1 for module LED's
-// Optimize with DMA?
+/* @brief Increases duty cycle on LED_CH_0 in nice fashion
+ */
 void leds_on(void) {
 	for (int i = 0; i < 200; i++) {
 		__HAL_TIM_SET_COMPARE(&htim8, TIM_CHANNEL_1, i * i);
@@ -679,6 +738,8 @@ void leds_on(void) {
 	}
 }
 
+/* @brief Decreases duty cycle on LED_CH_0 in nice fashion
+ */
 void leds_off(void) {
 	for (int i = 200; i > 0; i--) {
 		__HAL_TIM_SET_COMPARE(&htim8, TIM_CHANNEL_1, i * i);
@@ -688,7 +749,9 @@ void leds_off(void) {
 }
 /*END LED control functions---------------------------------------------------*/
 
-/*GPIO Interrupt Callbacks----------------------------------------------------*/
+/*HAL_GPIO_EXTI_Callback()------------------------------------------------------
+ * @brief Handles GPIO interrupts, sets detection flags for PIR interrupt and vandalised flag for kick sensor interrupt.
+ */
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
 	if (GPIO_Pin == GPIO_PIN_12 || GPIO_Pin == GPIO_PIN_11
 			|| GPIO_Pin == GPIO_PIN_15) {
@@ -697,24 +760,22 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
 		vandalised = 1;
 	}
 }
-/*GPIO Interrupt Callbacks----------------------------------------------------*/
+/*END HAL_GPIO_EXTI_Callback()------------------------------------------------*/
 
-/* Configure CAN Callbacks----------------------------------------------------*/
-//DELETE UNNECESARY CALLBACKS FOR FINAL REVIEW
+/* CAN callback configurations------------------------------------------------*/
+/* @brief Sets detection flag when message is received on Fifo0, resets RxData
+ */
 void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan) {
 	if (HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO0, &RxHeader, RxData) == HAL_OK) {
-		printf("Message on FIFO0 from: 0x%04lx: %02x\r\n", RxHeader.StdId,
-				RxData[0]);
 		detection_flag = 1;
 		RxData[0] = 0;
 	}
 }
 
+/* @brief Sets different flags depending on received message on Fifo1, resets RxData
+ */
 void HAL_CAN_RxFifo1MsgPendingCallback(CAN_HandleTypeDef *hcan) {
-//	printf("HAL_CAN_RxFifo1MsgPendingCallback\n\r");
 	if (HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO1, &RxHeader, RxData) == HAL_OK) {
-		printf("Message on FIFO1 from: 0x%04lx: %02x\r\n", RxHeader.StdId,
-				RxData[0]);
 
 		switch (RxData[0]) {
 		case 0x01:
@@ -740,20 +801,15 @@ void HAL_CAN_RxFifo1MsgPendingCallback(CAN_HandleTypeDef *hcan) {
 	}
 }
 
-void HAL_CAN_ErrorCallback(CAN_HandleTypeDef *hcan) {
-	printf("HAL_CAN_ErrorCallback\n\r");
-}
-/* End of CAN Callbacks-------------------------------------------------------*/
+/* END CAN Callbacks----------------------------------------------------------*/
 
 /* USER CODE END 4 */
 
 /**
- * @brief  This function is executed in case of error occurrence.
- * @retval None
+ * @brief  This function is executed in case of error occurrence, starts main().
  */
 void Error_Handler(void) {
 	/* USER CODE BEGIN Error_Handler_Debug */
-	/* User can add his own implementation to report the HAL error return state */
 	main();
 	/* USER CODE END Error_Handler_Debug */
 }
